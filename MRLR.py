@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
-
-
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+import numpy as np
 '''
 Multi-resolution approach: The MRLR method is like looking at a picture at different zoom levels. First, you capture the broad strokes (lower resolution), then you focus on finer details (higher resolution).
 PARAFAC decomposition: This is similar to breaking down a complex shape into simpler components. For a 3D tensor, imagine decomposing a complex 3D object into a set of 1D "building blocks" that, when combined, approximate the original object.
@@ -144,14 +145,57 @@ class MRLR:
         # Sum up all the approximations to get the final reconstruction
         # Analogy: This is like combining all our "sketches" to recreate the full "picture"
         return sum(self.decompose())
+    
+
+
+    def visualize_decomposition(self, approximations, residuals):
+        n_rows = len(approximations) + 1
+        fig = plt.figure(figsize=(20, 5*n_rows))
+        
+        # Plot original tensor
+        self._plot_tensor(fig, n_rows, 1, self.tensor, "Original Tensor")
+        
+        # Plot approximations and residuals
+        for i, (approx, res) in enumerate(zip(approximations, residuals[1:]), start=1):
+            self._plot_tensor(fig, n_rows, i*2, approx, f"Approximation {i}")
+            self._plot_tensor(fig, n_rows, i*2+1, res, f"Residual {i}")
+        
+        # Plot final reconstruction
+        reconstruction = sum(approximations)
+        self._plot_tensor(fig, n_rows, n_rows*2, reconstruction, "Final Reconstruction")
+        
+        plt.tight_layout()
+        plt.show()
+
+    def _plot_tensor(self, fig, n_rows, pos, tensor, title):
+        ax = fig.add_subplot(n_rows, 2, pos, projection='3d')
+        
+        if tensor.dim() == 2:
+            X, Y = np.meshgrid(range(tensor.shape[1]), range(tensor.shape[0]))
+            Z = tensor.numpy()
+        elif tensor.dim() == 3:
+            X, Y = np.meshgrid(range(tensor.shape[1]), range(tensor.shape[0]))
+            Z = tensor[:,:,0].numpy()
+        else:
+            raise ValueError(f"Unsupported tensor dimension: {tensor.dim()}")
+        
+        surf = ax.plot_surface(X, Y, Z, cmap='viridis')
+        ax.set_title(title)
+        fig.colorbar(surf, ax=ax, shrink=0.5, aspect=5)
+
+# ... (rest of the code remains the same)
+
+# ... (rest of the code remains the same)
 
 def normalized_frobenius_error(original, approximation):
     """Compute the Normalized Frobenius Error."""
     return torch.norm(original - approximation) / torch.norm(original)
 
+
+
 if __name__ == "__main__":
-    # Create a sample 5x201x61 tensor
-    tensor = torch.randn(5, 201, 61)
+    # Create a sample 24x27x23 tensor
+    tensor = torch.randn(24, 27, 23)
     
     # Define partitions for multi-resolution decomposition
     partitions = [
@@ -165,10 +209,13 @@ if __name__ == "__main__":
     # Create MRLR object and perform decomposition
     mrlr = MRLR(tensor, partitions, ranks)
     try:
-        approximations = mrlr.decompose()
+        approximations, residuals = mrlr.decompose()
+        
+        # Visualize the decomposition
+        mrlr.visualize_decomposition(approximations, residuals)
         
         # Reconstruct the tensor
-        reconstructed = mrlr.reconstruct()
+        reconstructed = sum(approximations)
         
         # Compute error
         error = normalized_frobenius_error(tensor, reconstructed)
@@ -177,5 +224,3 @@ if __name__ == "__main__":
         print(f"An error occurred: {e}")
         import traceback
         traceback.print_exc()
-
-
