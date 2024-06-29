@@ -1,6 +1,14 @@
 import torch
 import torch.nn.functional as F
 
+
+'''
+Multi-resolution approach: The MRLR method is like looking at a picture at different zoom levels. First, you capture the broad strokes (lower resolution), then you focus on finer details (higher resolution).
+PARAFAC decomposition: This is similar to breaking down a complex shape into simpler components. For a 3D tensor, imagine decomposing a complex 3D object into a set of 1D "building blocks" that, when combined, approximate the original object.
+Residual updates: This process is like an artist refining a sketch. First, they draw the main outlines, then they focus on the details that are missing from the initial sketch.
+Khatri-Rao product: This can be thought of as a way to combine information from different dimensions. It's like creating a "super factor" that represents the interaction between all other factors.
+Convergence check: This is similar to a painter stepping back from their canvas to see if the painting looks "close enough" to the subject. If it does, they stop; if not, they continue refining.
+'''
 class MRLR:
     def __init__(self, tensor, partitions, ranks):
         """
@@ -100,35 +108,61 @@ class MRLR:
 
     def decompose(self, max_iter=100, tol=1e-4):
         """Perform MRLR decomposition."""
-        # Start with the original tensor as the residual
-        # Analogy: This is like having the full "picture" that we want to approximate
         residual = self.tensor.clone()
         approximations = []
 
-        for partition, rank, partition_factors in zip(self.partitions, self.ranks, self.factors):
+        for partition, rank in zip(self.partitions, self.ranks):
             # Unfold the residual tensor according to the current partition
             unfolded = self._unfold(residual, partition)
             
-            # Perform PARAFAC decomposition on the residual
-            # Analogy: This is like creating a "sketch" of the remaining details
-            factors = self._parafac(residual, rank, max_iter, tol)
+            # Perform PARAFAC decomposition on the unfolded residual
+            factors = self._parafac(unfolded, rank, max_iter, tol)
             
             # Reconstruct the approximation from the factors
-            # Analogy: This is like combining our "sketches" to recreate the original "picture"
-            approximation = torch.zeros_like(residual)
-            for r in range(rank):
-                term = factors[0][:, r]
-                for factor in factors[1:]:
-                    term = torch.outer(term.flatten(), factor[:, r].flatten()).reshape(term.shape + factor[:, r].shape)
-                approximation += term
+            if len(factors) == 2:
+                approximation = self._fold(factors[0] @ factors[1].T, partition, residual.shape)
+            else:
+                # For higher-order tensors, we need a more general reconstruction method
+                approximation = self._fold(self._reconstruct_from_factors(factors), partition, residual.shape)
             
             approximations.append(approximation)
-            
-            # Update the residual by subtracting the current approximation
-            # Analogy: This is like focusing on the remaining details that we haven't captured yet
             residual -= approximation
 
         return approximations
+
+    def _reconstruct_from_factors(self, factors):
+        """Reconstruct the tensor from its factors."""
+        reconstructed = factors[0]
+        for factor in factors[1:]:
+            reconstructed = torch.einsum('...i,ji->...j', reconstructed, factor)
+        return reconstructed
+
+        def _parafac(self, unfolded, rank, max_iter=100, tol=1e-4):
+            """Perform PARAFAC decomposition on unfolded tensor."""
+            factors = [torch.randn(s, rank) for s in unfolded.shape]
+            
+            for _ in range(max_iter):
+                old_factors = [f.clone() for f in factors]
+                for mode in range(len(factors)):
+                    if mode == 0:
+                        mode_product = factors[1]
+                    else:
+                        mode_product = factors[0]
+                    
+                    V = mode_product.T @ mode_product
+                    factor_update = unfolded @ mode_product
+                    
+                    try:
+                        factors[mode] = factor_update @ torch.pinverse(V)
+                        factors[mode] = torch.nan_to_num(factors[mode], nan=0.0, posinf=1e10, neginf=-1e10)
+                    except RuntimeError as e:
+                        print(f"Error in PARAFAC: {e}")
+                        return factors
+                
+                if all(torch.norm(f - old_f) < tol for f, old_f in zip(factors, old_factors)):
+                    break
+            
+            return factors
     
     def reconstruct(self):
         """Reconstruct the tensor from its decomposition."""
