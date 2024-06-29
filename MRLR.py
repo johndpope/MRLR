@@ -137,32 +137,7 @@ class MRLR:
             reconstructed = torch.einsum('...i,ji->...j', reconstructed, factor)
         return reconstructed
 
-        def _parafac(self, unfolded, rank, max_iter=100, tol=1e-4):
-            """Perform PARAFAC decomposition on unfolded tensor."""
-            factors = [torch.randn(s, rank) for s in unfolded.shape]
-            
-            for _ in range(max_iter):
-                old_factors = [f.clone() for f in factors]
-                for mode in range(len(factors)):
-                    if mode == 0:
-                        mode_product = factors[1]
-                    else:
-                        mode_product = factors[0]
-                    
-                    V = mode_product.T @ mode_product
-                    factor_update = unfolded @ mode_product
-                    
-                    try:
-                        factors[mode] = factor_update @ torch.pinverse(V)
-                        factors[mode] = torch.nan_to_num(factors[mode], nan=0.0, posinf=1e10, neginf=-1e10)
-                    except RuntimeError as e:
-                        print(f"Error in PARAFAC: {e}")
-                        return factors
-                
-                if all(torch.norm(f - old_f) < tol for f, old_f in zip(factors, old_factors)):
-                    break
-            
-            return factors
+    
     
     def reconstruct(self):
         """Reconstruct the tensor from its decomposition."""
